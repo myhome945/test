@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>程式邏輯訓練：Scratch 版機器人</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SortableJS 拖放套件 -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <!-- SweetAlert2 彈出視窗套件 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        /* ================= 基礎與版面設定 ================= */
+        body {
+            background-color: #e5f0ff; 
+            touch-action: manipulation;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            margin: 0;
+            overflow: hidden; 
+        }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.3); }
+
+        /* ================= 積木 (Scratch Style) ================= */
+        .scratch-block {
+            position: relative; color: white; font-weight: bold; font-size: 15px;
+            border-radius: 6px; margin-bottom: 8px; cursor: grab;
+            display: flex; align-items: center; justify-content: space-between;
+            user-select: none; transition: transform 0.1s;
+            width: fit-content; 
+            min-width: 180px;   
+            gap: 16px;          
+        }
+        .scratch-block:active { cursor: grabbing; }
+
+        .block-normal { padding: 10px 16px; }
+
+        /* 藍色 - 動作類積木 (Motion) */
+        .block-motion {
+            background-color: #4C97FF; border: 1px solid #3373CC;
+            box-shadow: 0 4px 0 #3373CC; margin-bottom: 12px;
+        }
+
+        /* 橘色 - 控制類積木 (Control/Loop/If) */
+        .block-control {
+            background-color: #FFAB19; border: 1px solid #CF8B17;
+            box-shadow: 0 4px 0 #CF8B17; margin-bottom: 12px;
+        }
+
+        /* C字型/E字型 積木結構 */
+        .loop-block {
+            padding: 0; display: flex; flex-direction: column; align-items: stretch;
+        }
+        .loop-header {
+            padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;
+            gap: 16px; 
+        }
+        .else-header {
+            padding: 8px 16px; background-color: #FFAB19;
+            border-top: 1px solid rgba(0,0,0,0.15); border-bottom: 1px solid rgba(0,0,0,0.15);
+        }
+        .loop-body, .if-body, .else-body {
+            margin-left: 20px; background-color: rgba(255, 255, 255, 0.5); 
+            border-top: 1px solid rgba(0,0,0,0.15); border-bottom: 1px solid rgba(0,0,0,0.15);
+            min-height: 45px; padding: 8px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .loop-footer { height: 16px; border-radius: 0 0 6px 6px; }
+
+        /* 空容器提示文字 */
+        .loop-body.empty::after, .if-body.empty::after, .else-body.empty::after {
+            content: "放入積木..."; color: #CF8B17; font-weight: bold; opacity: 0.7;
+            display: flex; justify-content: center; align-items: center;
+            height: 100%; pointer-events: none; 
+        }
+
+        /* 執行中的高亮特效 */
+        .executing-block {
+            box-shadow: 0 0 0 4px rgba(255, 255, 0, 0.8), 0 4px 0 #3373CC !important;
+            filter: brightness(1.1);
+        }
+        .loop-block.executing-block {
+            box-shadow: 0 0 0 4px rgba(255, 255, 0, 0.8), 0 4px 0 #CF8B17 !important;
+        }
+
+        .delete-btn { display: none; }
+        #workspace .delete-btn { display: flex; }
+
+        /* 下拉選單樣式 */
+        select.condition-select {
+            color: #333; background: white; border: 1px solid #CF8B17;
+            border-radius: 4px; padding: 2px 4px; font-weight: bold; cursor: pointer;
+        }
+
+        /* ================= 遊戲舞台 ================= */
+        #game-board {
+            position: relative; 
+            border-radius: 0.5rem; width: 100%; aspect-ratio: 1 / 1; margin: 0 auto;
+            border: 2px solid #ddd;
+            transition: background-color 0.5s, border-color 0.5s;
+        }
+
+        .board-cell {
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.8rem; position: absolute; transition: all 0.25s ease-in-out;
+        }
+        #robot { z-index: 10; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.2)); }
+        input[type="number"] { cursor: text; }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- 導覽列 -->
+    <nav class="bg-[#4C97FF] h-14 flex items-center px-6 shadow-md z-20 shrink-0 justify-between">
+        <div class="text-white font-extrabold text-2xl tracking-wide flex items-center gap-2">
+            <span>🐧🚀</span> 邏輯訓練 <span class="text-sm font-normal bg-white/20 px-2 py-0.5 rounded-full ml-2 hidden md:inline">企鵝與太空船</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="text-white font-bold text-sm">選擇關卡：</span>
+            <select id="levelSelect" class="bg-white text-[#4C97FF] font-bold px-3 py-1.5 rounded shadow-sm outline-none cursor-pointer">
+                <!-- 動態生成關卡選單 -->
+            </select>
+        </div>
+    </nav>
+
+    <main class="flex flex-col md:flex-row flex-1 overflow-hidden">
+        
+        <!-- ================= [左欄] 工具箱 ================= -->
+        <aside class="w-full md:w-[300px] bg-white border-r border-gray-200 flex flex-col shrink-0 h-[35vh] md:h-full z-10 shadow-sm">
+            <div class="p-3 bg-gray-50 border-b border-gray-200 font-bold text-gray-600 text-sm">
+                🧰 積木清單
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-6">
+                
+                <div>
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">動作 (Motion)</h3>
+                    <div id="toolbox-motion" class="min-h-[50px]">
+                        <div class="scratch-block block-normal block-motion" data-action="move">
+                            <span>⬆️ 向前移動 1 步</span>
+                        </div>
+                        <div class="scratch-block block-normal block-motion" data-action="left">
+                            <span>⬅️ 向左轉 90 度</span>
+                        </div>
+                        <div class="scratch-block block-normal block-motion" data-action="right">
+                            <span>➡️ 向右轉 90 度</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">控制 (Control)</h3>
+                    <div id="toolbox-control" class="min-h-[50px]">
+                        <!-- 計次迴圈 -->
+                        <div class="scratch-block block-control loop-block" data-action="loop">
+                            <div class="loop-header">
+                                <span>🔁 重複執行 <input type="number" value="3" min="1" max="20" class="w-12 text-black text-center rounded border border-orange-400 px-1 py-0.5 shadow-inner pointer-events-auto nodrag" onclick="event.stopPropagation()"> 次</span>
+                            </div>
+                            <div class="loop-body empty pointer-events-auto"></div>
+                            <div class="loop-footer"></div>
+                        </div>
+
+                        <!-- 重複直到 (條件迴圈) -->
+                        <div class="scratch-block block-control loop-block" data-action="repeat-until">
+                            <div class="loop-header">
+                                <span>🔁 重複直到 <span class="bg-white text-orange-600 px-2 py-0.5 rounded shadow-sm text-sm border border-orange-300">達成目標 🎯</span></span>
+                            </div>
+                            <div class="loop-body empty pointer-events-auto"></div>
+                            <div class="loop-footer"></div>
+                        </div>
+
+                        <!-- 如果 (If) -->
+                        <div class="scratch-block block-control loop-block" data-action="if">
+                            <div class="loop-header">
+                                <span>🤔 如果 
+                                    <select class="condition-select pointer-events-auto nodrag" onclick="event.stopPropagation()">
+                                        <option value="path-clear">前方安全 (無障礙/牆壁)</option>
+                                        <option value="obstacle-ahead">前方有危險 (障礙/牆壁)</option>
+                                    </select>
+                                </span>
+                            </div>
+                            <div class="if-body empty pointer-events-auto"></div>
+                            <div class="loop-footer"></div>
+                        </div>
+
+                        <!-- 如果...否則... (If Else) -->
+                        <div class="scratch-block block-control loop-block" data-action="if-else">
+                            <div class="loop-header">
+                                <span>🤔 如果 
+                                    <select class="condition-select pointer-events-auto nodrag" onclick="event.stopPropagation()">
+                                        <option value="path-clear">前方安全 (無障礙/牆壁)</option>
+                                        <option value="obstacle-ahead">前方有危險 (障礙/牆壁)</option>
+                                    </select>
+                                </span>
+                            </div>
+                            <div class="if-body empty pointer-events-auto"></div>
+                            <div class="else-header"><span>否則</span></div>
+                            <div class="else-body empty pointer-events-auto"></div>
+                            <div class="loop-footer"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ================= [中欄] 程式工作區 ================= -->
+        <section class="flex-1 bg-[#F9F9F9] flex flex-col relative h-[35vh] md:h-full min-w-[300px]">
+            <div class="absolute top-4 right-4 z-10 flex gap-2">
+                <button id="clearBtn" class="bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-full shadow-sm text-sm font-bold transition flex items-center gap-1">
+                    🗑️ 清空
+                </button>
+            </div>
+            
+            <div class="p-4 pt-16 flex-1 overflow-y-auto">
+                <div id="workspace" class="min-h-full pb-32">
+                    <!-- 積木放置區 -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= [右欄] 舞台 ================= -->
+        <aside class="w-full md:w-[380px] bg-white border-l border-gray-200 flex flex-col shrink-0 h-[30vh] md:h-full z-10 shadow-[-2px_0_5px_rgba(0,0,0,0.02)]">
+            <div class="p-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                <div class="flex gap-2">
+                    <button id="runBtn" class="bg-[#4CAF50] hover:bg-[#45a049] text-white p-2 rounded shadow-sm transition" title="執行程式 (綠旗)">
+                        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                    </button>
+                    <button id="resetBoardBtn" class="bg-[#ff4c4c] hover:bg-[#e60000] text-white p-2 rounded shadow-sm transition" title="重置位置 (停止)">
+                        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd"></path></svg>
+                    </button>
+                </div>
+                <div class="text-sm font-bold text-gray-500" id="levelTitleDisplay">階段一：第 1 關</div>
+            </div>
+
+            <div class="p-4 flex-1 overflow-y-auto flex flex-col">
+                <div id="game-board" class="shadow-inner mb-4"></div>
+                
+                <div id="statusMessage" class="bg-blue-50 border border-blue-200 text-blue-700 p-3 rounded-lg text-center text-sm font-bold mb-4">
+                    拼湊積木後，點擊綠色按鈕執行！
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+    <script>
+        // ---------------- 關卡資料設計 (20關) ----------------
+        const gridSize = 6; 
+        const cellSize = 100 / gridSize; 
+        
+        let maxUnlockedLevel = parseInt(localStorage.getItem('robotGameUnlockedLevel')) || 0;
+        let currentLevel = maxUnlockedLevel; 
+        
+        let isRunning = false;
+        let hasCrashed = false; 
+        let isStopped = false; // 用於手動強制中斷程式
+        let loopSafetyCounter = 0; 
+        
+        let robotState = { x: 0, y: 0, rotation: 90 };
+
+        // 定義不同階段的「主題佈景」
+        const themes = {
+            1: { // 第一階段：冰層企鵝
+                char: '🐧', target: '🐟', obstacle: '🦈',
+                bg: '#e0f2fe', border: '#7dd3fc', grid: '#bae6fd'
+            },
+            2: { // 第二階段：深空探索
+                char: '🚀', target: '🪐', obstacle: '☄️',
+                bg: '#0f172a', border: '#3730a3', grid: '#334155'
+            }
+        };
+
+        // 階段一：1-10關 (主要訓練：順序與計次迴圈)
+        // 階段二：11-20關 (主要訓練：條件判斷與重複直到)
+        const levels = [
+            // ============ 階段一 (企鵝與魚) ============
+            { stage: 1, title: "1. 啟程", start: { x: 1, y: 2, rotation: 90 }, target: { x: 4, y: 2 }, obstacles: [] },
+            { stage: 1, title: "2. 轉向", start: { x: 1, y: 1, rotation: 90 }, target: { x: 4, y: 4 }, obstacles: [{ x: 4, y: 1 }, { x: 1, y: 4 }] },
+            { stage: 1, title: "3. 繞路", start: { x: 1, y: 1, rotation: 90 }, target: { x: 4, y: 1 }, obstacles: [{ x: 2, y: 1 }, { x: 3, y: 1 }] },
+            { stage: 1, title: "4. 計次迴圈", start: { x: 0, y: 0, rotation: 90 }, target: { x: 5, y: 0 }, obstacles: [] },
+            { stage: 1, title: "5. 階梯步道", start: { x: 0, y: 0, rotation: 90 }, target: { x: 5, y: 5 }, obstacles: [{ x: 1, y: 0 }, { x: 2, y: 1 }, { x: 3, y: 2 }, { x: 4, y: 3 }, { x: 5, y: 4 }] },
+            { stage: 1, title: "6. ㄇ字型", start: { x: 1, y: 1, rotation: 90 }, target: { x: 1, y: 4 }, obstacles: [{ x: 2, y: 2 }, { x: 3, y: 2 }, { x: 4, y: 2 }, { x: 2, y: 3 }, { x: 3, y: 3 }, { x: 4, y: 3 }] },
+            { stage: 1, title: "7. 蜿蜒海溝", start: { x: 0, y: 0, rotation: 180 }, target: { x: 4, y: 5 }, obstacles: [{x:1,y:0}, {x:1,y:1}, {x:1,y:2}, {x:1,y:3}, {x:1,y:4}, {x:3,y:1}, {x:3,y:2}, {x:3,y:3}, {x:3,y:4}, {x:3,y:5}] },
+            { stage: 1, title: "8. 冰山方波", start: { x: 0, y: 2, rotation: 90 }, target: { x: 5, y: 2 }, obstacles: [{x:1,y:1}, {x:1,y:2}, {x:3,y:2}, {x:3,y:3}, {x:2,y:4}, {x:4,y:0}] },
+            { stage: 1, title: "9. 閃避", start: { x: 0, y: 0, rotation: 90 }, target: { x: 5, y: 5 }, obstacles: [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 1 }, { x: 1, y: 3 }, { x: 2, y: 3 }, { x: 3, y: 3 }, { x: 4, y: 3 }] },
+            { stage: 1, title: "10. S型迷宮", start: { x: 0, y: 0, rotation: 90 }, target: { x: 5, y: 5 }, obstacles: [{x: 0, y: 1}, {x: 1, y: 1}, {x: 2, y: 1}, {x: 3, y: 1}, {x: 4, y: 1}, {x: 1, y: 3}, {x: 2, y: 3}, {x: 3, y: 3}, {x: 4, y: 3}, {x: 5, y: 3}] },
+            
+            // ============ 階段二 (太空船與星球) ============
+            { stage: 2, title: "11. 星際直航 (重複直到)", start: { x: 0, y: 3, rotation: 90 }, target: { x: 5, y: 3 }, obstacles: [] },
+            
+            { stage: 2, title: "12. 邊界巡航 (嘗試用如果)", start: { x: 0, y: 0, rotation: 90 }, target: { x: 0, y: 1 }, 
+              obstacles: [
+                  {x:1,y:1},{x:2,y:1},{x:3,y:1},{x:4,y:1}, 
+                  {x:1,y:2},{x:2,y:2},{x:3,y:2},{x:4,y:2}, 
+                  {x:1,y:3},{x:2,y:3},{x:3,y:3},{x:4,y:3}, 
+                  {x:1,y:4},{x:2,y:4},{x:3,y:4},{x:4,y:4}
+              ] 
+            },
+            
+            { stage: 2, title: "13. 右轉星雲 (如果)", start: { x: 0, y: 0, rotation: 90 }, target: { x: 2, y: 3 }, obstacles: [ {x:0,y:1}, {x:1,y:1}, {x:2,y:1}, {x:3,y:1}, {x:4,y:1}, {x:4,y:2}, {x:1,y:3}, {x:4,y:3}, {x:1,y:4}, {x:2,y:4}, {x:3,y:4}, {x:4,y:4} ] },
+            { stage: 2, title: "14. 左轉星雲 (如果否則)", start: { x: 5, y: 5, rotation: 0 }, target: { x: 2, y: 2 }, obstacles: [ {x:1,y:1}, {x:2,y:1}, {x:3,y:1}, {x:4,y:1}, {x:1,y:2}, {x:4,y:2}, {x:1,y:3}, {x:2,y:3}, {x:4,y:3}, {x:4,y:4}, {x:0,y:5}, {x:1,y:5}, {x:2,y:5}, {x:3,y:5}, {x:4,y:5} ] },
+            
+            { stage: 2, title: "15. 繞行隕石 (如果否則)", start: { x: 0, y: 2, rotation: 90 }, target: { x: 5, y: 2 }, 
+              obstacles: [{x:2,y:2}, {x:4,y:2}] 
+            },
+            
+            { stage: 2, title: "16. 智慧導航 (如果否則)", start: { x: 0, y: 0, rotation: 90 }, target: { x: 5, y: 5 }, 
+              obstacles: [
+                  {x:1,y:0},{x:2,y:0},{x:3,y:0},{x:4,y:0},{x:5,y:0},
+                  {x:2,y:1},{x:3,y:1},{x:4,y:1},{x:5,y:1},
+                  {x:0,y:2},{x:4,y:2},{x:5,y:2},
+                  {x:0,y:3},{x:1,y:3},{x:2,y:3},{x:5,y:3},
+                  {x:0,y:4},{x:1,y:4},{x:2,y:4},{x:3,y:4},
+                  {x:0,y:5},{x:1,y:5},{x:2,y:5},{x:3,y:5},{x:4,y:5}
+              ] 
+            },
+            
+            // ⭐ 重新設計 17 關：S型星雲隧道。這是一個無法用單一 "如果否則" 破解的迷宮，
+            // 學生必須混合使用「計次迴圈」、「重複直到」與「手動轉向」來寫出長篇的連續動作演算法。
+            { stage: 2, title: "17. S型星雲隧道 (綜合應用)", start: { x: 0, y: 0, rotation: 90 }, target: { x: 5, y: 4 }, 
+              obstacles: [
+                  {x:5,y:0}, 
+                  {x:0,y:1}, {x:1,y:1}, {x:2,y:1}, {x:3,y:1}, {x:5,y:1}, 
+                  {x:0,y:2}, {x:5,y:2}, 
+                  {x:0,y:3}, {x:2,y:3}, {x:3,y:3}, {x:4,y:3}, {x:5,y:3}, 
+                  {x:0,y:4}, 
+                  {x:0,y:5}, {x:1,y:5}, {x:2,y:5}, {x:3,y:5}, {x:4,y:5}, {x:5,y:5}
+              ] 
+            },
+            
+            // ⭐ 重新設計 18 關：星系逃脫 (向外螺旋)。從迷宮中心出發，必須不斷右轉繞出核心。
+            // 這關封死了所有捷徑，完美引導學生寫出萬用的「右手法則 (沿牆走)」演算法！
+            { stage: 2, title: "18. 星系逃脫 (向外螺旋)", start: { x: 2, y: 3, rotation: 90 }, target: { x: 5, y: 5 }, 
+              obstacles: [
+                  {x:0,y:0},{x:1,y:0},{x:2,y:0},{x:3,y:0},{x:4,y:0},{x:5,y:0},
+                  {x:0,y:1},
+                  {x:0,y:2},{x:2,y:2},{x:3,y:2},{x:4,y:2},
+                  {x:0,y:3},{x:4,y:3},
+                  {x:0,y:4},{x:4,y:4},
+                  {x:0,y:5},{x:1,y:5},{x:2,y:5},{x:3,y:5},{x:4,y:5}
+              ] 
+            },
+            
+            // ⭐ 重新設計 19 關：鋸齒小行星帶。轉彎方向交替不可預測 (右->左->右->左)。
+            // 單純的「遇到牆壁就右轉」會導致撞毀。這關逼迫學生寫出高階的「試探型演算法」。
+            { stage: 2, title: "19. 混沌星域 (動態轉向)", start: { x: 0, y: 0, rotation: 90 }, target: { x: 5, y: 5 }, 
+              obstacles: [
+                  {x:3,y:0}, {x:4,y:0}, {x:5,y:0},
+                  {x:0,y:1}, {x:1,y:1}, {x:3,y:1}, {x:4,y:1}, {x:5,y:1},
+                  {x:0,y:2}, {x:1,y:2}, {x:5,y:2},
+                  {x:0,y:3}, {x:1,y:3}, {x:2,y:3}, {x:3,y:3}, {x:5,y:3},
+                  {x:0,y:4}, {x:1,y:4}, {x:2,y:4}, {x:3,y:4},
+                  {x:0,y:5}, {x:1,y:5}, {x:2,y:5}, {x:3,y:5}, {x:4,y:5}
+              ] 
+            },
+            
+            { stage: 2, title: "20. 終極黑洞迷宮", start: { x: 0, y: 0, rotation: 90 }, target: { x: 3, y: 2 }, obstacles: [{x:0,y:1},{x:1,y:1}, {x:2,y:1}, {x:3,y:1}, {x:4,y:1}, {x:4,y:2}, {x:4,y:3}, {x:4,y:4}, {x:3,y:4}, {x:2,y:4}, {x:1,y:4}, {x:1,y:3}, {x:1,y:2}] }
+        ];
+
+        const board = document.getElementById('game-board');
+        const levelTitleDisplay = document.getElementById('levelTitleDisplay');
+        const statusMessage = document.getElementById('statusMessage');
+        const workspace = document.getElementById('workspace');
+        const levelSelect = document.getElementById('levelSelect');
+
+        // 動態更新下拉選單狀態 (未解鎖的關卡加上 🔒 並禁用)
+        function updateLevelSelectUI() {
+            levelSelect.innerHTML = '';
+            levels.forEach((lvl, idx) => {
+                const opt = document.createElement('option');
+                opt.value = idx;
+                if (idx <= maxUnlockedLevel) {
+                    opt.innerText = `階段${lvl.stage} - ${lvl.title}`;
+                    opt.disabled = false;
+                } else {
+                    opt.innerText = `🔒 階段${lvl.stage} - ${lvl.title} (未解鎖)`;
+                    opt.disabled = true;
+                }
+                levelSelect.appendChild(opt);
+            });
+            levelSelect.value = currentLevel;
+        }
+
+        levelSelect.addEventListener('change', (e) => {
+            if(!isRunning) { workspace.innerHTML = ''; loadLevel(parseInt(e.target.value)); }
+        });
+
+        board.style.backgroundSize = `${cellSize}% ${cellSize}%`;
+
+        // ---------------- 拖放功能設定 ----------------
+        const sortableOptions = {
+            group: 'shared', animation: 150, fallbackOnBody: true, swapThreshold: 0.65, emptyInsertThreshold: 50,
+            filter: '.nodrag, .delete-btn', preventOnFilter: false,
+            onAdd: function (evt) {
+                const item = evt.item;
+                item.classList.remove('cursor-grab'); item.classList.add('cursor-pointer');
+                
+                if (!item.querySelector('.delete-btn')) {
+                    const delBtn = document.createElement('span');
+                    delBtn.innerHTML = '✕';
+                    delBtn.className = 'delete-btn text-white hover:bg-white/30 transition ml-2 bg-black/10 rounded-full w-6 h-6 items-center justify-center cursor-pointer shadow-sm z-10 nodrag flex-shrink-0';
+                    const targetDiv = (item.getAttribute('data-action') === 'loop' || item.getAttribute('data-action') === 'repeat-until' || item.getAttribute('data-action') === 'if' || item.getAttribute('data-action') === 'if-else') ? item.firstElementChild : item;
+                    targetDiv.appendChild(delBtn);
+
+                    const removeAction = function(e) {
+                        e.stopPropagation(); e.preventDefault();
+                        if(!isRunning) { item.remove(); checkEmptyLoops(); }
+                    };
+                    delBtn.onclick = removeAction;
+                    delBtn.ontouchstart = removeAction;
+                }
+
+                item.querySelectorAll('.loop-body, .if-body, .else-body').forEach(body => {
+                    if (!body.sortableInstance) body.sortableInstance = new Sortable(body, sortableOptions);
+                });
+                checkEmptyLoops();
+            },
+            onRemove: checkEmptyLoops, onUpdate: checkEmptyLoops
+        };
+
+        const toolboxConfig = { group: { name: 'shared', pull: 'clone', put: false }, animation: 150, sort: false, filter: '.nodrag', preventOnFilter: false };
+        new Sortable(document.getElementById('toolbox-motion'), toolboxConfig);
+        new Sortable(document.getElementById('toolbox-control'), toolboxConfig);
+        new Sortable(workspace, sortableOptions);
+
+        function checkEmptyLoops() {
+            document.querySelectorAll('.loop-body, .if-body, .else-body').forEach(body => {
+                const validChildren = Array.from(body.children).filter(child => !child.classList.contains('sortable-ghost') && !child.classList.contains('sortable-drag'));
+                if (validChildren.length === 0) body.classList.add('empty');
+                else body.classList.remove('empty');
+            });
+        }
+
+        // ---------------- 遊戲邏輯與渲染 ----------------
+
+        function setStatus(text, type = 'info') {
+            statusMessage.innerText = text;
+            statusMessage.className = "p-3 rounded-lg text-center text-sm font-bold mb-4 ";
+            if(type === 'error') statusMessage.className += "bg-red-50 border border-red-200 text-red-700";
+            else if(type === 'success') statusMessage.className += "bg-green-50 border border-green-200 text-green-700";
+            else if(type === 'warning') statusMessage.className += "bg-orange-50 border border-orange-200 text-orange-700";
+            else statusMessage.className += "bg-blue-50 border border-blue-200 text-blue-700";
+        }
+
+        function loadLevel(index) {
+            currentLevel = index;
+            levelSelect.value = index;
+            levelTitleDisplay.innerText = `階段${levels[index].stage}：${levels[index].title}`;
+            setStatus("拼湊積木後，點擊綠色按鈕執行！");
+            resetRobot(); renderBoard();
+        }
+
+        function resetRobot() {
+            robotState.x = levels[currentLevel].start.x;
+            robotState.y = levels[currentLevel].start.y;
+            robotState.rotation = levels[currentLevel].start.rotation;
+        }
+
+        function renderBoard() {
+            board.innerHTML = '';
+            
+            const theme = themes[levels[currentLevel].stage];
+            board.style.backgroundColor = theme.bg;
+            board.style.borderColor = theme.border;
+            board.style.backgroundImage = `
+                linear-gradient(to right, ${theme.grid} 1px, transparent 1px),
+                linear-gradient(to bottom, ${theme.grid} 1px, transparent 1px)
+            `;
+
+            levels[currentLevel].obstacles.forEach(obs => createCell(theme.obstacle, obs.x, obs.y));
+            createCell(theme.target, levels[currentLevel].target.x, levels[currentLevel].target.y);
+            
+            const robotEl = document.createElement('div');
+            robotEl.id = 'robot';
+            robotEl.className = 'board-cell text-4xl';
+            robotEl.innerText = theme.char;
+            updateRobotPosition(robotEl);
+            board.appendChild(robotEl);
+        }
+
+        function createCell(icon, x, y) {
+            const el = document.createElement('div');
+            el.className = 'board-cell'; el.innerText = icon;
+            el.style.width = `${cellSize}%`; el.style.height = `${cellSize}%`;
+            el.style.left = `${x * cellSize}%`; el.style.top = `${y * cellSize}%`;
+            board.appendChild(el);
+        }
+
+        function updateRobotPosition(el = document.getElementById('robot')) {
+            if(!el) return;
+            el.style.width = `${cellSize}%`; 
+            el.style.height = `${cellSize}%`;
+            el.style.left = `${robotState.x * cellSize}%`;
+            el.style.top = `${robotState.y * cellSize}%`;
+            el.style.transform = `rotate(${robotState.rotation}deg)`;
+        }
+
+        // ---------------- 條件判斷邏輯 ----------------
+        function checkCondition(conditionType) {
+            const heading = ((robotState.rotation % 360) + 360) % 360;
+            let nx = robotState.x, ny = robotState.y;
+            if (heading === 0) ny -= 1;
+            else if (heading === 90) nx += 1;
+            else if (heading === 180) ny += 1;
+            else if (heading === 270) nx -= 1;
+
+            const isOutOfBounds = nx < 0 || nx >= gridSize || ny < 0 || ny >= gridSize;
+            const isObstacle = levels[currentLevel].obstacles.some(o => o.x === nx && o.y === ny);
+            const isBlocked = isOutOfBounds || isObstacle;
+            const isTargetReached = robotState.x === levels[currentLevel].target.x && robotState.y === levels[currentLevel].target.y;
+
+            if (conditionType === 'path-clear') return !isBlocked;
+            if (conditionType === 'obstacle-ahead') return isBlocked;
+            if (conditionType === 'target-reached') return isTargetReached;
+            return false;
+        }
+
+        // ---------------- 執行程式碼 ----------------
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function executeBlocks(blocks) {
+            for (let i = 0; i < blocks.length; i++) {
+                if (hasCrashed || isStopped) return; 
+                
+                const block = blocks[i];
+                const action = block.getAttribute('data-action');
+                block.classList.add('executing-block');
+                
+                if (action === 'loop') {
+                    const times = parseInt(block.querySelector('input').value) || 1;
+                    setStatus(`執行中：重複 ${times} 次`, 'warning');
+                    const loopBodyBlocks = Array.from(block.querySelector('.loop-body').children);
+                    for (let j = 0; j < times; j++) {
+                        if (hasCrashed || isStopped) break; 
+                        await executeBlocks(loopBodyBlocks);
+                    }
+                } 
+                else if (action === 'repeat-until') {
+                    setStatus(`執行中：重複直到達成目標`, 'warning');
+                    const bodyBlocks = Array.from(block.querySelector('.loop-body').children);
+                    
+                    if (bodyBlocks.length === 0) {
+                        setStatus("⚠️ 警告：重複直到積木內沒有指令！", 'warning');
+                        await sleep(500);
+                    } else {
+                        let safeCount = 0;
+                        while (!checkCondition('target-reached') && !hasCrashed && !isStopped) {
+                            if(safeCount++ > 200) { 
+                                hasCrashed = true;
+                                setStatus("💥 程式執行過久，強制停止 (可能陷入無窮迴圈)", 'error');
+                                break;
+                            }
+                            await executeBlocks(bodyBlocks);
+                        }
+                    }
+                }
+                else if (action === 'if') {
+                    const cond = block.querySelector('.condition-select').value;
+                    const bodyBlocks = Array.from(block.querySelector('.if-body').children);
+                    if (checkCondition(cond)) {
+                        setStatus(`條件成立，執行【如果】內容`, 'warning');
+                        await executeBlocks(bodyBlocks);
+                    }
+                }
+                else if (action === 'if-else') {
+                    const cond = block.querySelector('.condition-select').value;
+                    const ifBlocks = Array.from(block.querySelector('.if-body').children);
+                    const elseBlocks = Array.from(block.querySelector('.else-body').children);
+                    if (checkCondition(cond)) {
+                        setStatus(`條件成立，執行【如果】內容`, 'warning');
+                        await executeBlocks(ifBlocks);
+                    } else {
+                        setStatus(`條件不成立，執行【否則】內容`, 'warning');
+                        await executeBlocks(elseBlocks);
+                    }
+                }
+                else {
+                    setStatus(`執行中...`, 'warning');
+                    if (action === 'move') {
+                        const heading = ((robotState.rotation % 360) + 360) % 360;
+                        if (heading === 0) robotState.y -= 1;
+                        else if (heading === 90) robotState.x += 1;
+                        else if (heading === 180) robotState.y += 1;
+                        else if (heading === 270) robotState.x -= 1;
+                    } else if (action === 'left') robotState.rotation -= 90;
+                    else if (action === 'right') robotState.rotation += 90;
+
+                    updateRobotPosition();
+                    await sleep(350); 
+
+                    if (robotState.x < 0 || robotState.x >= gridSize || robotState.y < 0 || robotState.y >= gridSize) {
+                        hasCrashed = true; setStatus("💥 糟糕！角色掉出邊界了！", 'error'); 
+                    } else {
+                        const hitObstacle = levels[currentLevel].obstacles.some(obs => obs.x === robotState.x && obs.y === robotState.y);
+                        if (hitObstacle) {
+                            hasCrashed = true; setStatus("💥 糟糕！撞到障礙物了！", 'error'); 
+                        }
+                    }
+                }
+                block.classList.remove('executing-block');
+            }
+        }
+
+        async function runCode() {
+            if (isRunning) return;
+            const rootBlocks = Array.from(workspace.children);
+            if (rootBlocks.length === 0) { Swal.fire('提示', '程式區目前沒有任何積木喔！', 'info'); return; }
+
+            isRunning = true; hasCrashed = false; isStopped = false; 
+            document.getElementById('runBtn').classList.add('opacity-50');
+            
+            resetRobot(); renderBoard(); await sleep(300);
+
+            try {
+                await executeBlocks(rootBlocks);
+            } catch (err) {
+                console.error("執行發生異常:", err);
+                hasCrashed = true;
+            } finally {
+                document.querySelectorAll('.executing-block').forEach(b => b.classList.remove('executing-block'));
+
+                if (isStopped) {
+                    setStatus("⏹️ 程式已手動停止", 'warning');
+                } else if (!hasCrashed) {
+                    if (checkCondition('target-reached')) {
+                        setStatus("🎉 恭喜！成功抵達目標！", 'success'); 
+                        
+                        // 過關解鎖邏輯
+                        if (currentLevel === maxUnlockedLevel && currentLevel < levels.length - 1) {
+                            maxUnlockedLevel++;
+                            localStorage.setItem('robotGameUnlockedLevel', maxUnlockedLevel);
+                            updateLevelSelectUI();
+                        }
+
+                        if (currentLevel < levels.length - 1) {
+                            Swal.fire({
+                                title: '過關！', text: '邏輯非常正確！', icon: 'success',
+                                confirmButtonText: '挑戰下一關 ▶', confirmButtonColor: '#4CAF50'
+                            }).then((res) => {
+                                if (res.isConfirmed) { workspace.innerHTML = ''; loadLevel(currentLevel + 1); }
+                            });
+                        } else {
+                            Swal.fire('太棒了！', '你已經完成了 20 關挑戰！', 'success');
+                        }
+                    } else {
+                        setStatus("🤔 程式結束，但還沒達成目標喔！", 'warning'); 
+                    }
+                } else {
+                    Swal.fire('失敗', '角色遇到危險或掉出邊界，請檢查積木邏輯！', 'error'); 
+                }
+
+                isRunning = false; 
+                document.getElementById('runBtn').classList.remove('opacity-50');
+            }
+        }
+
+        // ---------------- 事件綁定 ----------------
+        document.getElementById('runBtn').addEventListener('click', runCode);
+        
+        document.getElementById('clearBtn').addEventListener('click', () => { 
+            if(isRunning) { 
+                Swal.fire('提示', '程式正在執行中，請先點擊右側的「紅色停止按鈕」！', 'warning');
+            } else {
+                workspace.innerHTML = ''; 
+                setStatus("工作區已清空"); 
+            }
+        });
+
+        document.getElementById('resetBoardBtn').addEventListener('click', () => { 
+            if(isRunning) { 
+                isStopped = true; 
+            } else { 
+                resetRobot(); renderBoard(); setStatus("位置已重置"); 
+            }
+        });
+        
+        // 初始化載入
+        updateLevelSelectUI();
+        loadLevel(currentLevel);
+    </script>
+</body>
+</html>
